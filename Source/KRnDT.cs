@@ -13,41 +13,6 @@ using System.Text.RegularExpressions;
 
 namespace KRnD
 {
-    // This class stores all types of upgrades a part can have.
-    public class KRnDUpgradeT
-    {
-        //public int ispVac = 0;
-        //public const String ISP_VAC = "ispVac";
-
-        public override string ToString()
-        {
-            return "KRnDUpgradeT(" +
-              //  ISP_VAC+":" + this.ispVac.ToString() + "," +
-				")";
-        }
-
-        public ConfigNode createConfigNode(string name)
-        {
-            ConfigNode node = new ConfigNode(name);
-           // if (this.ispVac > 0) node.AddValue(ISP_VAC, this.ispVac.ToString());
-            return node;
-        }
-
-        public static KRnDUpgrade createFromConfigNode(ConfigNode node)
-        {
-            KRnDUpgrade upgrade = new KRnDUpgrade();
-          //  if (node.HasValue(ISP_VAC)) upgrade.ispVac = Int32.Parse(node.GetValue(ISP_VAC));
-            return upgrade;
-        }
-
-        public KRnDUpgrade clone()
-        {
-            KRnDUpgrade copy = new KRnDUpgrade();
-           // copy.ispVac = this.ispVac;
-            return copy;
-        }
-    }
-
     // This class is used to store all relevant base-stats of a part used to calculate all other stats with
     // incrementel upgrades as well as a backup for resoting the original stats (eg after loading a savegame).
     public class PartStatsT
@@ -71,6 +36,8 @@ namespace KRnD
         public static Dictionary<string, KRnDUpgrade> upgrades = new Dictionary<string, KRnDUpgrade>();
         public static List<string> fuelResources = null;
         public static List<string> blacklistedParts = null;
+		public static List<KRnDUpgradeDefinition> upgradeDefinitions;
+		public static List<KRnDUpgradeT> globalUpgrades = new List<KRnDUpgradeT>();
 
         public static KRnDModule getKRnDModule(Part part)
         {
@@ -121,7 +88,7 @@ namespace KRnD
             int upgradesApplied = 0;
             try
             {
-                if (KRnD.upgrades == null) throw new Exception("upgrades-dictionary missing");
+				
                 foreach (AvailablePart part in PartLoader.LoadedPartsList)
                 {
                     try
@@ -415,94 +382,16 @@ namespace KRnD
         {
             try
             {
-                // Create a list of all valid fuel resources:
-                if (KRnD.fuelResources == null)
-                {
-                    KRnD.fuelResources = new List<string>();
-                    KRnD.fuelResources.Add("MonoPropellant"); // Always use MonoPropellant as fuel (RCS-Thrusters don't have engine modules and are not found with the code below)
+				//TODO rewrite to use GameDatabase, so ModuleManager can alter definitions
+				if(KRnDT.upgradeDefinitions == null)
+				{
+					var node = ConfigNode.Load(KSPUtil.ApplicationRootPath + "GameData/KRnD/upgradeDefs.cfg");
 
-                    foreach (AvailablePart aPart in PartLoader.LoadedPartsList)
-                    {
-                        Part part = aPart.partPrefab;
-                        List<ModuleEngines> engineModules = KRnD.getEngineModules(part);
-                        if (engineModules == null) continue;
-                        foreach (ModuleEngines engineModule in engineModules)
-                        {
-                            if (engineModule.propellants == null) continue;
-                            foreach (Propellant propellant in engineModule.propellants)
-                            {
-                                if (propellant.name == "ElectricCharge") continue; // Electric Charge is improved by batteries.
-                                if (propellant.name == "IntakeAir") continue; // This is no real fuel-type.
-                                if (!fuelResources.Contains(propellant.name)) fuelResources.Add(propellant.name);
-                            }
-                        }
-                    }
-
-                    String listString = "";
-                    foreach (String fuelName in KRnD.fuelResources)
-                    {
-                        if (listString != "") listString += ", ";
-                        listString += fuelName;
-                    }
-                    Debug.Log("[KRnD] found " + KRnD.fuelResources.Count.ToString() + " propellants: " + listString);
-                }
-
-                // Create a list of blacklisted parts (parts with known incompatible modules of other mods):
-                if (KRnD.blacklistedParts == null)
-                {
-                    KRnD.blacklistedParts = getBlacklistedParts();
-                    List<string> blacklistedModules = getBlacklistedModules();
-
-                    foreach (AvailablePart aPart in PartLoader.LoadedPartsList)
-                    {
-                        Part part = aPart.partPrefab;
-                        Boolean skip = false;
-                        string blacklistedModule = "N/A";
-
-                        foreach (PartModule partModule in part.Modules)
-                        {
-                            if (blacklistedModules.Contains(partModule.moduleName))
-                            {
-                                blacklistedModule = partModule.moduleName;
-                                skip = true;
-                                break;
-                            }
-                        }
-                        if (skip)
-                        {
-                            Debug.Log("[KRnD] blacklisting part '" + part.name.ToString() + "' (has blacklisted module '" + blacklistedModule.ToString() + "')");
-                            if (!KRnD.blacklistedParts.Contains(part.name)) KRnD.blacklistedParts.Add(part.name);
-                            continue;
-                        }
-                    }
-
-                    Debug.Log("[KRnD] blacklisted " + KRnD.blacklistedParts.Count.ToString() + " parts, which contained one of " + blacklistedModules.Count.ToString() + " blacklisted modules");
-                }
-
-                // Create a backup of all unmodified parts before we update them. We will later use these backup-parts
-                // for all calculations of upgraded stats.
-                if (KRnD.originalStats == null)
-                {
-                    KRnD.originalStats = new Dictionary<string, PartStats>();
-                    foreach (AvailablePart aPart in PartLoader.LoadedPartsList)
-                    {
-                        Part part = aPart.partPrefab;
-
-                        // Backup this part, if it has the RnD-Module:
-                        if (KRnD.getKRnDModule(part) != null)
-                        {
-                            PartStats duplicate;
-                            if (originalStats.TryGetValue(part.name, out duplicate))
-                            {
-                                Debug.LogError("[KRnD] Awake(): duplicate part-name: " + part.name.ToString());
-                            }
-                            else
-                            {
-                                originalStats.Add(part.name, new PartStats(part));
-                            }
-                        }
-                    }
-                }
+					foreach (ConfigNode upgradeDefNode in node.GetNodes("KRnDUpgradeDefinitions"))
+					{
+						upgradeDefinitions.Add(KRnDUpgradeDefinition.Load(upgradeDefNode));
+					}
+				}	
 
                 // Execute the following code only once:
                 if (KRnDT.initialized) return;
@@ -530,18 +419,22 @@ namespace KRnD
             try
             {
                 double time = DateTime.Now.Ticks;
-                ConfigNode upgradeNodes = new ConfigNode("upgrades");
-                foreach (string upgradeName in KRnD.upgrades.Keys)
-                {
-                    KRnDUpgrade upgrade;
-                    if (!KRnD.upgrades.TryGetValue(upgradeName, out upgrade)) continue;
-                    upgradeNodes.AddNode(upgrade.createConfigNode(upgradeName));
-                    Debug.Log("[KRnD] saved: " + upgradeName + " " + upgrade.ToString());
-                }
-                node.AddNode(upgradeNodes);
+                ConfigNode upgradesNode = new ConfigNode("upgrades");
+
+				foreach (KRnDUpgradeT upgrade in KRnDT.globalUpgrades)
+				{
+					ConfigNode partNode = upgradesNode.HasNode(upgrade.partName) ?
+						upgradesNode.GetNode(upgrade.partName) :
+						upgradesNode.AddNode(upgrade.partName);
+					ConfigNode upgradeNode = partNode.AddNode(upgrade.partName);
+					upgradeNode.AddValue("level", upgrade.level);
+					Debug.Log("[KRnD] saved: " + upgrade.definition.upgradeName + " " + upgrade.ToString());
+				}
+
+				node.AddNode(upgradesNode);
 
                 time = (DateTime.Now.Ticks - time) / TimeSpan.TicksPerSecond;
-                Debug.Log("[KRnD] saved " + upgradeNodes.CountNodes.ToString() + " upgrades in " + time.ToString("0.000s"));
+				Debug.Log("[KRnD] saved " + upgradesNode.CountNodes.ToString() + " upgrades in " + time.ToString("0.000s"));
 
                 ConfigNode guiSettings = new ConfigNode("gui");
                 guiSettings.AddValue("left", KRnDGUI.windowPosition.xMin);
@@ -561,19 +454,23 @@ namespace KRnD
                 double time = DateTime.Now.Ticks;
                 int upgradesApplied = 0;
 
-                KRnD.upgrades.Clear();
-
-                ConfigNode upgradeNodes = node.GetNode("upgrades");
-                if (upgradeNodes != null)
+				ConfigNode upgradesNode = node.GetNode("upgrades");
+                if (upgradesNode != null)
                 {
-                    foreach (ConfigNode upgradeNode in upgradeNodes.GetNodes())
-                    {
-                        KRnDUpgrade upgrade = KRnDUpgrade.createFromConfigNode(upgradeNode);
-                        KRnD.upgrades.Add(upgradeNode.name, upgrade);
-                    }
+					foreach(ConfigNode partNode in upgradesNode.GetNodes())
+					{
+						//TODO rename ConfigNode variables
+						foreach(ConfigNode upgradeNode in partNode.GetNodes())
+						{
+							//if(KRnDT.upgradeDefinitions.Contains
+						}
+					}
+					foreach (KRnDUpgradeDefinition upgradeDef in KRnDT.upgradeDefinitions)
+						if(upgradesNode.HasNode(upgradeDef.upgradeName))
+							upgradeDef.level = upgradesNode.GetNode(upgradeDef.upgradeName).GetValue("level");
 
                     // Update global part-list with new upgrades from the savegame:
-                    upgradesApplied = KRnD.updateGlobalParts();
+                    upgradesApplied = KRnDT.updateGlobalParts();
 
                     // If we started with an active vessel, update that vessel:
                     Vessel vessel = FlightGlobals.ActiveVessel;
@@ -599,5 +496,74 @@ namespace KRnD
             }
         }
     }
+
+	public class KRnDUpgradeDefinition
+	{
+		[KSPField(isPersistant = true)]
+		public String upgradeName = "";
+
+		[KSPField(isPersistant = true)]
+		public String upgradePath = "";
+
+		[KSPField(isPersistant = true)]
+		public String upgradePropertyName = "";
+
+		[KSPField(isPersistant = true)]
+		public String upgradeEquation = ""; //keyword "level" - is for current upgrade level
+
+		public static bool operator ==(KRnDUpgradeDefinition a, KRnDUpgradeDefinition b)
+		{
+			return a.upgradeName == b.upgradeName;
+		}
+
+		public static bool operator !=(KRnDUpgradeDefinition a, KRnDUpgradeDefinition b)
+		{
+			return a.upgradeName != b.upgradeName;
+		}
+
+		public void Save(ConfigNode node)
+		{
+			try
+			{
+				var n = node.AddNode(upgradeName);
+				n.AddValue("upgradePath",upgradePath);
+				n.AddValue("upgradePropertyName",upgradePropertyName);
+				n.AddValue("upgradeEquation",upgradeEquation);
+			}
+			catch (Exception e)
+			{
+				Debug.LogError("[KRnD] KRnDUpgradeDefinition.Save(): " + e.ToString());
+			}
+		}
+
+		public static KRnDUpgradeDefinition Load(ConfigNode node)
+		{
+			KRnDUpgradeDefinition def = new KRnDUpgradeDefinition ();
+			try
+			{
+				def.upgradeName = node.name;
+				def.upgradePath = node.GetValue("upgradePath");
+				def.upgradePropertyName = node.GetValue("upgradePropertyName");
+				def.upgradeEquation = node.GetValue("upgradeEquation");
+			}
+			catch (Exception e)
+			{
+				Debug.LogError("[KRnD] KRnDUpgradeDefinition.Load(): " + e.ToString());
+			}
+			return def;
+		}
+	}
+
+	public class KRnDUpgradeT
+	{
+		[KSPField(isPersistant = true)]
+		public KRnDUpgradeDefinition definition;
+
+		[KSPField(isPersistant = true)]
+		public int level = 0;
+
+		[KSPField(isPersistant = true)]
+		public String partName;
+	}
 
 }
